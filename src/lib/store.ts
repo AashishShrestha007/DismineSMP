@@ -1,7 +1,27 @@
 // Lightweight localStorage-based store for applications, users, roles & settings
 
 export type ApplicationStatus = 'pending' | 'approved' | 'rejected' | 'under_review';
-export type UserRole = 'owner' | 'admin' | 'manager' | 'staff' | 'builder' | 'user';
+export type UserRole = 'owner' | 'admin' | 'manager' | 'staff' | 'builder' | 'user' | string;
+
+export type Permission = 
+  | 'access_admin'        // Access admin panel
+  | 'manage_applications' // Review/Approve/Reject apps
+  | 'manage_users'        // Edit/Ban users
+  | 'manage_roles'        // Create/Edit/Delete roles
+  | 'manage_settings'     // Edit site settings & socials
+  | 'manage_forms'        // Form builder
+  | 'manage_server'       // Season & Rules
+  | 'view_apps_only';     // Staff view only access
+
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  permissions: Permission[];
+  color: string;
+  icon: string;
+  isCustom: boolean;
+}
 
 export interface ApplicationEntry {
   id: string;
@@ -19,18 +39,20 @@ export interface ApplicationEntry {
   reviewedAt?: string;
   notes?: string;
   adminMessage?: string;
+  userRole?: string; // Cache the role at submission time
 }
 
 export interface UserAccount {
   id: string;
   discordId?: string;
+  googleId?: string;
   discordUsername?: string;
   discordAvatar?: string;
   email?: string;
   displayName: string;
   password?: string;
-  authMethod: 'discord' | 'email';
-  role: UserRole;
+  authMethod: 'discord' | 'google' | 'email';
+  role: UserRole; // Can be a string ID for custom roles
   createdAt: string;
   status?: 'active' | 'banned';
 }
@@ -100,6 +122,7 @@ const USERS_KEY = 'dismine_users';
 const SESSION_KEY = 'dismine_session';
 const SETTINGS_KEY = 'dismine_settings';
 const CHATS_KEY = 'dismine_chats';
+const ROLES_KEY = 'dismine_roles';
 
 // Default owner credentials
 const OWNER_EMAIL = 'owner@dismine.com';
@@ -107,57 +130,141 @@ const OWNER_PASSWORD = 'dismine2025';
 
 // ─── ROLE HELPERS ───────────────────────────────────────
 
-const ROLE_HIERARCHY: Record<UserRole, number> = {
-  owner: 6,
-  admin: 5,
-  manager: 3,
-  staff: 2,
-  builder: 2,
-  user: 1,
-};
+export const BUILTIN_ROLES: Role[] = [
+  {
+    id: 'owner',
+    name: 'Owner',
+    description: 'Full server founder permissions.',
+    permissions: ['access_admin', 'manage_applications', 'manage_users', 'manage_roles', 'manage_settings', 'manage_forms', 'manage_server'],
+    color: '#fbbf24', // Amber 400
+    icon: 'Crown',
+    isCustom: false
+  },
+  {
+    id: 'admin',
+    name: 'Admin',
+    description: 'Server management and oversight.',
+    permissions: ['access_admin', 'manage_applications', 'manage_users', 'manage_roles', 'manage_settings', 'manage_forms', 'manage_server'],
+    color: '#f87171', // Red 400
+    icon: 'Shield',
+    isCustom: false
+  },
+  {
+    id: 'manager',
+    name: 'Manager',
+    description: 'Community and application management.',
+    permissions: ['access_admin', 'manage_applications'],
+    color: '#c084fc', // Purple 400
+    icon: 'UserCog',
+    isCustom: false
+  },
+  {
+    id: 'staff',
+    name: 'Staff',
+    description: 'Day-to-day moderation.',
+    permissions: ['access_admin', 'view_apps_only'],
+    color: '#60a5fa', // Blue 400
+    icon: 'Users',
+    isCustom: false
+  },
+  {
+    id: 'builder',
+    name: 'Builder',
+    description: 'Server world design and builds.',
+    permissions: ['access_admin', 'view_apps_only'],
+    color: '#34d399', // Emerald 400
+    icon: 'Hammer',
+    isCustom: false
+  },
+  {
+    id: 'user',
+    name: 'Member',
+    description: 'Standard community member.',
+    permissions: [],
+    color: '#a3a3a3', // Neutral 400
+    icon: 'User',
+    isCustom: false
+  }
+];
 
-export function canAccessAdmin(role: UserRole): boolean {
-  return ROLE_HIERARCHY[role] >= ROLE_HIERARCHY.staff;
+export function getRoles(): Role[] {
+  try {
+    const data = localStorage.getItem(ROLES_KEY);
+    const customRoles = data ? JSON.parse(data) : [];
+    return [...BUILTIN_ROLES, ...customRoles];
+  } catch {
+    return BUILTIN_ROLES;
+  }
 }
 
-export function canManageRoles(role: UserRole): boolean {
-  return ROLE_HIERARCHY[role] >= ROLE_HIERARCHY.admin;
+export function saveRole(role: Role): void {
+  const customRoles = getRoles().filter(r => r.isCustom);
+  const index = customRoles.findIndex(r => r.id === role.id);
+  if (index !== -1) {
+    customRoles[index] = role;
+  } else {
+    customRoles.push(role);
+  }
+  localStorage.setItem(ROLES_KEY, JSON.stringify(customRoles));
 }
 
-export function canDeleteUsers(role: UserRole): boolean {
-  return role === 'owner';
+export function deleteRole(roleId: string): void {
+  const customRoles = getRoles().filter(r => r.isCustom && r.id !== roleId);
+  localStorage.setItem(ROLES_KEY, JSON.stringify(customRoles));
 }
 
-export function canManageSettings(role: UserRole): boolean {
-  return ROLE_HIERARCHY[role] >= ROLE_HIERARCHY.admin;
+export function getRoleById(roleId: UserRole): Role {
+  return getRoles().find(r => r.id === roleId) || BUILTIN_ROLES[5]; // Fallback to Member
 }
 
-export function canReviewApplications(role: UserRole): boolean {
-  return ROLE_HIERARCHY[role] >= ROLE_HIERARCHY.manager;
+export function hasPermission(roleId: UserRole, permission: Permission): boolean {
+  const role = getRoleById(roleId);
+  if (role.id === 'owner') return true; // Owner has all permissions
+  return role.permissions.includes(permission);
 }
 
-export function getRoleLabel(role: UserRole): string {
-  const labels: Record<UserRole, string> = {
-    owner: 'Owner',
-    admin: 'Admin',
-    manager: 'Manager',
-    staff: 'Staff',
-    builder: 'Builder',
-    user: 'Member',
+export function canAccessAdmin(roleId: UserRole): boolean {
+  return hasPermission(roleId, 'access_admin');
+}
+
+export function canManageRoles(roleId: UserRole): boolean {
+  return hasPermission(roleId, 'manage_roles');
+}
+
+export function canDeleteUsers(roleId: UserRole): boolean {
+  return roleId === 'owner';
+}
+
+export function canManageSettings(roleId: UserRole): boolean {
+  return hasPermission(roleId, 'manage_settings');
+}
+
+export function canReviewApplications(roleId: UserRole): boolean {
+  return hasPermission(roleId, 'manage_applications');
+}
+
+export function getRoleLabel(roleId: UserRole): string {
+  return getRoleById(roleId).name;
+}
+
+export function getRoleColor(roleId: UserRole): { text: string; bg: string; border: string } {
+  const role = getRoleById(roleId);
+  const color = role.color;
+  return { 
+    text: `text-[${color}]`, 
+    bg: `bg-[${color}]/10`, 
+    border: `border-[${color}]/20` 
   };
-  return labels[role];
 }
 
-export function getRoleColor(role: UserRole): { text: string; bg: string; border: string } {
-  const colors: Record<UserRole, { text: string; bg: string; border: string }> = {
-    owner: { text: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' },
-    admin: { text: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20' },
-    manager: { text: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
-    staff: { text: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
-    builder: { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
-    user: { text: 'text-neutral-400', bg: 'bg-neutral-500/10', border: 'border-neutral-500/20' },
+// Fixed version of getRoleColor that works with tailwind or hex
+export function getRoleStyle(roleId: UserRole) {
+  const role = getRoleById(roleId);
+  return {
+    color: role.color,
+    backgroundColor: `${role.color}1a`, // 10% opacity hex
+    borderColor: `${role.color}33`, // 20% opacity hex
   };
-  return colors[role];
 }
 
 // ─── USER AUTH ──────────────────────────────────────────
@@ -197,18 +304,45 @@ export function ensureOwnerAccount(): void {
 
 export function registerUser(user: Omit<UserAccount, 'id' | 'createdAt' | 'role'>): { success: boolean; error?: string; user?: UserAccount } {
   const users = getUsers();
+  const settings = getSettings();
 
   if (user.authMethod === 'email' && user.email) {
-    const exists = users.find((u) => u.email === user.email);
+    const exists = users.find((u) => u.email === user.email && u.authMethod === 'email');
     if (exists) return { success: false, error: 'An account with this email already exists.' };
   }
 
   if (user.authMethod === 'discord' && user.discordId) {
     const exists = users.find((u) => u.discordId === user.discordId);
     if (exists) {
+      // Check if user is banned
+      if (exists.status === 'banned') return { success: false, error: 'This account has been banned from the community.' };
+      // Check if login is enabled
+      const isStaff = canAccessAdmin(exists.role);
+      if (!settings.loginEnabled && !isStaff) {
+        return { success: false, error: settings.maintenanceMessage || 'Login is currently disabled for maintenance.' };
+      }
       setSession(exists);
       return { success: true, user: exists };
     }
+  }
+
+  if (user.authMethod === 'google' && user.googleId) {
+    const exists = users.find((u) => u.googleId === user.googleId);
+    if (exists) {
+      if (exists.status === 'banned') return { success: false, error: 'This account has been banned from the community.' };
+      // Check if login is enabled
+      const isStaff = canAccessAdmin(exists.role);
+      if (!settings.loginEnabled && !isStaff) {
+        return { success: false, error: settings.maintenanceMessage || 'Login is currently disabled for maintenance.' };
+      }
+      setSession(exists);
+      return { success: true, user: exists };
+    }
+  }
+
+  // If we reach here, it's a new user registration. Check if enabled.
+  if (!settings.registrationEnabled) {
+    return { success: false, error: settings.maintenanceMessage || 'Registrations are currently closed.' };
   }
 
   const newUser: UserAccount = {
@@ -260,44 +394,7 @@ export function clearSession(): void {
   sessionStorage.removeItem(SESSION_KEY);
 }
 
-export function simulateDiscordOAuth(): UserAccount {
-  const discordNames = [
-    'BlockMaster', 'CreeperSlayer', 'DiamondHunter', 'EnderDragon', 'FrostWalker',
-    'GhastHunter', 'HerobrineX', 'IronGolem', 'JungleLord', 'KnightBlade',
-  ];
-  const randomName = discordNames[Math.floor(Math.random() * discordNames.length)];
-  const discriminator = Math.floor(Math.random() * 9999).toString().padStart(4, '0');
-  const discordId = Math.floor(Math.random() * 999999999).toString();
-
-  const user: Omit<UserAccount, 'id' | 'createdAt' | 'role'> = {
-    discordId,
-    discordUsername: `${randomName}#${discriminator}`,
-    discordAvatar: undefined,
-    displayName: randomName,
-    authMethod: 'discord',
-  };
-
-  const result = registerUser(user);
-  return result.user!;
-}
-
-export function simulateGoogleOAuth(): UserAccount {
-  const googleNames = [
-    'PixelBuilder', 'CraftyGamer', 'MineAdventurer', 'RedstoneWiz', 'SkyBlocker',
-    'LapisLover', 'ObsidianKnight', 'NetherWalker', 'VillageGuard', 'WolfTamer',
-  ];
-  const randomName = googleNames[Math.floor(Math.random() * googleNames.length)];
-  const email = `${randomName.toLowerCase()}@gmail.com`;
-
-  const user: Omit<UserAccount, 'id' | 'createdAt' | 'role'> = {
-    email,
-    displayName: randomName,
-    authMethod: 'email', // Treating simulated Google as email-based but with social data
-  };
-
-  const result = registerUser(user);
-  return result.user!;
-}
+// Social simulation functions removed.
 
 // ─── USER MANAGEMENT (ADMIN) ────────────────────────────
 
@@ -749,24 +846,6 @@ export interface ApplicationChat {
   status: 'open' | 'closed';
   messages: ChatMessage[];
   initiatedByStaff: boolean;
-}
-
-export interface ApplicationEntry {
-  id: string;
-  userId: string;
-  formId: string;
-  formName: string;
-  username: string;
-  responses?: Record<string, string>;
-  age?: string;
-  timezone?: string;
-  why?: string;
-  experience?: string;
-  status: ApplicationStatus;
-  submittedAt: string;
-  reviewedAt?: string;
-  notes?: string;
-  adminMessage?: string;
 }
 
 export function getApplicationSchedule(): ApplicationSchedule {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Menu, X, Shield, User, LogIn, Crown, UserCog, Users, Hammer } from 'lucide-react';
-import { getSession, getRoleLabel, getRoleColor, type UserAccount, type UserRole } from '../lib/store';
+import { Menu, X, Shield, User, LogIn, Crown, UserCog, Users, Hammer, Heart, Star, Sword, Wrench, LifeBuoy, Zap } from 'lucide-react';
+import { getSession, getRoleLabel, getRoleStyle, getRoles, type UserAccount, type UserRole } from '../lib/store';
 
 const navLinks = [
   { label: 'About', href: '#about' },
@@ -15,15 +15,17 @@ interface NavbarProps {
   onPortalClick?: () => void;
 }
 
-function getRoleBadgeIcon(role: UserRole) {
-  switch (role) {
-    case 'owner': return <Crown size={8} />;
-    case 'admin': return <Shield size={8} />;
-    case 'manager': return <UserCog size={8} />;
-    case 'staff': return <Users size={8} />;
-    case 'builder': return <Hammer size={8} />;
-    default: return <User size={8} />;
-  }
+function getRoleBadgeIcon(roleId: UserRole) {
+  const roles = getRoles();
+  const role = roles.find(r => r.id === roleId) || { icon: 'User' };
+  const iconName = role.icon;
+  
+  const icons: Record<string, any> = {
+    Crown, Shield, UserCog, Users, Hammer, User, Heart, Star, Sword, Wrench, LifeBuoy, Zap
+  };
+  
+  const IconComponent = icons[iconName] || User;
+  return <IconComponent size={8} />;
 }
 
 export function Navbar({ onAdminClick, onLoginClick, onPortalClick }: NavbarProps) {
@@ -63,7 +65,7 @@ export function Navbar({ onAdminClick, onLoginClick, onPortalClick }: NavbarProp
         </a>
 
         {/* Desktop Nav */}
-        <div className="hidden md:flex items-center gap-1">
+                  <div className="hidden md:flex items-center gap-1">
           {navLinks.map((link) => (
             <a
               key={link.label}
@@ -84,7 +86,10 @@ export function Navbar({ onAdminClick, onLoginClick, onPortalClick }: NavbarProp
                   {user.displayName.slice(0, 2)}
                 </div>
                 <span className="max-w-[80px] truncate">{user.displayName}</span>
-                <span className={`inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${getRoleColor(user.role).bg} ${getRoleColor(user.role).text}`}>
+                <span 
+                  className={`inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full border`}
+                  style={{ color: getRoleStyle(user.role).color, backgroundColor: getRoleStyle(user.role).backgroundColor, borderColor: getRoleStyle(user.role).borderColor }}
+                >
                   {getRoleBadgeIcon(user.role)}
                   {getRoleLabel(user.role).toUpperCase()}
                 </span>
@@ -164,7 +169,10 @@ export function Navbar({ onAdminClick, onLoginClick, onPortalClick }: NavbarProp
                 <div className="text-left">
                   <div className="text-sm font-medium flex items-center gap-2">
                     {user.displayName}
-                    <span className={`inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${getRoleColor(user.role).bg} ${getRoleColor(user.role).text}`}>
+                    <span 
+                      className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full border"
+                      style={{ color: getRoleStyle(user.role).color, backgroundColor: getRoleStyle(user.role).backgroundColor, borderColor: getRoleStyle(user.role).borderColor }}
+                    >
                       {getRoleBadgeIcon(user.role)}
                       {getRoleLabel(user.role).toUpperCase()}
                     </span>

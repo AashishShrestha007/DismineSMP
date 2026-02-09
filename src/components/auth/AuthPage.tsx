@@ -13,10 +13,8 @@ import {
 import { 
   registerUser, 
   loginUser, 
-  simulateDiscordOAuth, 
   getDiscordConfig,
   getGoogleConfig,
-  simulateGoogleOAuth,
   canAccessAdmin
 } from '../../lib/store';
 
@@ -45,80 +43,86 @@ export function AuthPage({ onAuth, onBack }: Props) {
   useEffect(() => {
     const handleSocialCallback = async () => {
       const hash = window.location.hash;
-      if (!hash) return;
+      if (!hash || !hash.includes('access_token')) return;
+
+      const fragment = new URLSearchParams(hash.slice(1));
+      const accessToken = fragment.get('access_token');
+      const state = fragment.get('state');
+      
+      if (!accessToken) return;
+
+      // Clear hash immediately
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
 
       // Discord Callback
-      if (hash.includes('access_token') && !hash.includes('token_type=Bearer')) {
-        const fragment = new URLSearchParams(hash.slice(1));
-        const accessToken = fragment.get('access_token');
-        
-        if (accessToken) {
-          setDiscordLoading(true);
-          try {
-            const response = await fetch('https://discord.com/api/users/@me', {
-              headers: { Authorization: `Bearer ${accessToken}` }
+      if (state === 'discord') {
+        setDiscordLoading(true);
+        try {
+          const response = await fetch('https://discord.com/api/users/@me', {
+            headers: { Authorization: `Bearer ${accessToken}` }
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            const result = registerUser({
+               email: data.email,
+               displayName: data.global_name || data.username,
+               discordId: data.id,
+               discordUsername: data.discriminator === '0' ? data.username : `${data.username}#${data.discriminator}`,
+               discordAvatar: data.avatar ? `https://cdn.discordapp.com/avatars/${data.id}/${data.avatar}.png` : undefined,
+               authMethod: 'discord'
             });
             
-            if (response.ok) {
-              const data = await response.json();
-              const result = registerUser({
-                 email: data.email,
-                 displayName: data.global_name || data.username,
-                 discordId: data.id,
-                 discordUsername: data.discriminator === '0' ? data.username : `${data.username}#${data.discriminator}`,
-                 discordAvatar: data.avatar ? `https://cdn.discordapp.com/avatars/${data.id}/${data.avatar}.png` : undefined,
-                 authMethod: 'discord'
-              });
-              
-              if (result.success) {
-                window.location.hash = '';
-                onAuth();
-              } else {
-                setError(result.error || 'Discord login failed.');
-              }
+            if (result.success) {
+              onAuth();
+            } else {
+              setError(result.error || 'Discord login failed.');
             }
-          } catch (err) {
-            console.error(err);
-            setError('Failed to connect to Discord.');
-          } finally {
-            setDiscordLoading(false);
+          } else {
+            const errorData = await response.json().catch(() => ({}));
+            console.error('Discord UserInfo Error:', errorData);
+            setError('Discord authorization failed. Please ensure your Redirect URI matches exactly.');
           }
+        } catch (err) {
+          console.error('Discord Fetch Error:', err);
+          setError('Failed to connect to Discord.');
+        } finally {
+          setDiscordLoading(false);
         }
       }
 
       // Google Callback
-      if (hash.includes('access_token') && hash.includes('token_type=Bearer')) {
-        const fragment = new URLSearchParams(hash.slice(1));
-        const accessToken = fragment.get('access_token');
+      if (state === 'google') {
+        setGoogleLoading(true);
+        try {
+          const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${accessToken}` }
+          });
 
-        if (accessToken) {
-          setGoogleLoading(true);
-          try {
-            const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-              headers: { Authorization: `Bearer ${accessToken}` }
+          if (response.ok) {
+            const data = await response.json();
+            const result = registerUser({
+              email: data.email,
+              googleId: data.sub,
+              displayName: data.name || data.given_name || data.email.split('@')[0],
+              authMethod: 'google',
             });
 
-            if (response.ok) {
-              const data = await response.json();
-              const result = registerUser({
-                email: data.email,
-                displayName: data.name || data.given_name || data.email.split('@')[0],
-                authMethod: 'email', // Use email method for Google profiles
-              });
-
-              if (result.success) {
-                window.location.hash = '';
-                onAuth();
-              } else {
-                setError(result.error || 'Google login failed.');
-              }
+            if (result.success) {
+              onAuth();
+            } else {
+              setError(result.error || 'Google login failed.');
             }
-          } catch (err) {
-            console.error(err);
-            setError('Failed to connect to Google.');
-          } finally {
-            setGoogleLoading(false);
+          } else {
+            const errorData = await response.json().catch(() => ({}));
+            console.error('Google UserInfo Error:', errorData);
+            setError('Google authorization failed. Please ensure your Client ID is correct.');
           }
+        } catch (err) {
+          console.error('Google Fetch Error:', err);
+          setError('Failed to connect to Google.');
+        } finally {
+          setGoogleLoading(false);
         }
       }
     };
@@ -173,53 +177,37 @@ export function AuthPage({ onAuth, onBack }: Props) {
   };
 
   const handleDiscordAuth = () => {
-    if (mode === 'register' && !settings.registrationEnabled) {
-      setError(settings.maintenanceMessage || 'Registrations are currently closed.');
-      return;
-    }
     setError('');
-    setDiscordLoading(true);
-
     const config = getDiscordConfig();
     if (config.isEnabled && config.clientId) {
-       const redirectUri = config.redirectUri || window.location.href.split('#')[0];
+       setDiscordLoading(true);
+       const baseUrl = window.location.origin + window.location.pathname;
+       const redirectUri = config.redirectUri || baseUrl;
        const scope = 'identify email';
-       const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${config.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}`;
+       const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${config.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}&state=discord`;
        window.location.href = authUrl;
        return;
     }
 
-    // Simulate Discord OAuth popup flow (Fallback)
-    setTimeout(() => {
-      simulateDiscordOAuth();
-      setDiscordLoading(false);
-      onAuth();
-    }, 1500);
+    setError('Discord login is currently not configured by the administrator.');
+    setDiscordLoading(false);
   };
 
   const handleGoogleAuth = () => {
-    if (mode === 'register' && !settings.registrationEnabled) {
-      setError(settings.maintenanceMessage || 'Registrations are currently closed.');
-      return;
-    }
     setError('');
-    setGoogleLoading(true);
-
     const config = getGoogleConfig();
     if (config.isEnabled && config.clientId) {
-      const redirectUri = config.redirectUri || window.location.href.split('#')[0];
+      setGoogleLoading(true);
+      const baseUrl = window.location.origin + window.location.pathname;
+      const redirectUri = config.redirectUri || baseUrl;
       const scope = 'https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email';
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${config.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}`;
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${config.clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}&state=google`;
       window.location.href = authUrl;
       return;
     }
 
-    // Simulate Google OAuth popup flow (Fallback)
-    setTimeout(() => {
-      simulateGoogleOAuth();
-      setGoogleLoading(false);
-      onAuth();
-    }, 1500);
+    setError('Google login is currently not configured by the administrator.');
+    setGoogleLoading(false);
   };
 
   return (
