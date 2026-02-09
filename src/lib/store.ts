@@ -1,4 +1,5 @@
 // Lightweight localStorage-based store for applications, users, roles & settings
+import { createClient } from '@supabase/supabase-js';
 
 export type ApplicationStatus = 'pending' | 'approved' | 'rejected' | 'under_review';
 export type UserRole = 'owner' | 'admin' | 'manager' | 'staff' | 'builder' | 'user' | string;
@@ -102,12 +103,19 @@ export interface GoogleConfig {
   isEnabled: boolean;
 }
 
+export interface SupabaseConfig {
+  url: string;
+  key: string;
+  isEnabled: boolean;
+}
+
 export interface SiteSettings {
   socialLinks: SocialLink[];
   serverInfo: ServerInfo;
   seasonInfo?: SeasonInfo;
   discordConfig?: DiscordConfig;
   googleConfig?: GoogleConfig;
+  supabaseConfig?: SupabaseConfig;
   registrationEnabled: boolean;
   loginEnabled: boolean;
   maintenanceMessage?: string;
@@ -671,6 +679,102 @@ export function saveGoogleConfig(config: GoogleConfig): void {
   const settings = getSettings();
   settings.googleConfig = config;
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+export function getSupabaseConfig(): SupabaseConfig {
+  const settings = getSettings();
+  return settings.supabaseConfig || {
+    url: '',
+    key: '',
+    isEnabled: false
+  };
+}
+
+export function saveSupabaseConfig(config: SupabaseConfig): void {
+  const settings = getSettings();
+  settings.supabaseConfig = config;
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+export function getSupabase() {
+  const config = getSupabaseConfig();
+  if (config.isEnabled && config.url && config.key) {
+    try {
+      return createClient(config.url, config.key);
+    } catch (e) {
+      console.error('Failed to initialize Supabase:', e);
+      return null;
+    }
+  }
+  return null;
+}
+
+// ─── CLOUD SYNC ─────────────────────────────────────────
+
+export async function syncToCloud(): Promise<{ success: boolean; error?: string }> {
+  const supabase = getSupabase();
+  if (!supabase) return { success: false, error: 'Cloud Sync is not enabled or configured.' };
+
+  try {
+    const apps = getApplications();
+    const users = getUsers();
+    const settings = getSettings();
+    const roles = getRoles().filter(r => r.isCustom);
+    const chats = getAppChats();
+
+    // In a real app, we'd have tables for these. 
+    // For this "fix", we'll store everything in a single 'site_data' table or similar.
+    // However, to keep it simple and reliable for the user, we'll just push the 
+    // current state to a 'backups' table or similar.
+    
+    // BETTER: If the user provides Supabase, we expect them to have a 'site_data' table.
+    // Let's use a single row in a 'site_configs' table for simplicity in this prototype.
+    
+    const dataToSync = {
+      applications: apps,
+      users: users,
+      settings: settings,
+      roles: roles,
+      chats: chats,
+      updated_at: new Date().toISOString()
+    };
+
+    const { error } = await supabase
+      .from('site_sync')
+      .upsert({ id: 'current_state', data: dataToSync });
+
+    if (error) throw error;
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+}
+
+export async function syncFromCloud(): Promise<{ success: boolean; error?: string }> {
+  const supabase = getSupabase();
+  if (!supabase) return { success: false, error: 'Cloud Sync is not enabled or configured.' };
+
+  try {
+    const { data, error } = await supabase
+      .from('site_sync')
+      .select('data')
+      .eq('id', 'current_state')
+      .single();
+
+    if (error) throw error;
+    if (data && data.data) {
+      const d = data.data;
+      if (d.applications) localStorage.setItem(STORAGE_KEY, JSON.stringify(d.applications));
+      if (d.users) localStorage.setItem(USERS_KEY, JSON.stringify(d.users));
+      if (d.settings) localStorage.setItem(SETTINGS_KEY, JSON.stringify(d.settings));
+      if (d.roles) localStorage.setItem(ROLES_KEY, JSON.stringify(d.roles));
+      if (d.chats) localStorage.setItem(CHATS_KEY, JSON.stringify(d.chats));
+      return { success: true };
+    }
+    return { success: false, error: 'No data found in cloud.' };
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
 }
 
 // ─── SEASON INFO ────────────────────────────────────────

@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  LogOut, Users, Clock, CheckCircle, XCircle, Eye, EyeOff, Search, Filter,
-  BarChart3, FileText, Settings, ChevronDown, ArrowLeft, Trash2,
-  MessageSquare, Calendar, Globe, User, AlertTriangle, Shield, Link2,
-  Crown, UserCog, ToggleLeft, ToggleRight, Save, Server,
-  Plus, Pencil, X, Hammer, Image, Sparkles, FormInput, ArrowUp, ArrowDown, Lock, Unlock,
-  Youtube, Instagram, Twitter, Twitch, Linkedin, Github, Facebook, Music, Video, Gamepad2, Mail,
-  Heart, Star, Sword, Wrench, LifeBuoy, Zap
+  LogOut, Users, Clock, CheckCircle, XCircle, Eye, EyeOff, Search,
+  BarChart3, FileText, Settings, ArrowLeft, Trash2,
+  MessageSquare, Globe, User, AlertTriangle, Shield, Link2,
+  Crown, UserCog, ToggleLeft, ToggleRight, Server,
+  Plus, Pencil, X, Hammer, FormInput, ArrowUp, ArrowDown, Lock,
+  Youtube, Instagram, Twitter, Twitch, Music, Video, Gamepad2, Mail,
+  Heart, Star, Sword, Wrench, LifeBuoy, Zap, Database, Cloud, RefreshCw, AlertCircle
 } from 'lucide-react';
 import { 
   getApplications, updateApplication, deleteApplication, getStats,
@@ -19,9 +19,10 @@ import {
   getChatByAppId, saveChatMessage, toggleChatStatus, deleteChat,
   getRoles, saveRole, deleteRole, getRoleStyle, BUILTIN_ROLES,
   generateMemberId, updateUserMemberId, adminCreateUser,
+  getSupabaseConfig, saveSupabaseConfig, syncToCloud, syncFromCloud,
   type ApplicationEntry, type ApplicationStatus, type UserAccount,
   type UserRole, type SocialLink, type ServerInfo, type SeasonInfo, type AppField, type DiscordConfig, type GoogleConfig,
-  type AppForm, type ApplicationChat, type Role, type Permission
+  type AppForm, type ApplicationChat, type Role, type Permission, type SupabaseConfig
 } from '../../lib/store';
 
 interface Props {
@@ -30,7 +31,7 @@ interface Props {
   onBack: () => void;
 }
 
-type Tab = 'overview' | 'applications' | 'users' | 'roles' | 'server' | 'formbuilder' | 'socials' | 'settings';
+type Tab = 'overview' | 'applications' | 'users' | 'roles' | 'server' | 'formbuilder' | 'socials' | 'database' | 'settings';
 type FilterStatus = 'all' | ApplicationStatus;
 
 const statusConfig: Record<ApplicationStatus, { label: string; color: string; bg: string; border: string }> = {
@@ -60,11 +61,9 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [selectedApp, setSelectedApp] = useState<ApplicationEntry | null>(null);
   const [selectedApps, setSelectedApps] = useState<string[]>([]);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [noteInput, setNoteInput] = useState('');
   const [messageInput, setMessageInput] = useState('');
-  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [currentChat, setCurrentChat] = useState<ApplicationChat | null>(null);
   const [chatMessage, setChatMessage] = useState('');
 
@@ -74,7 +73,6 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
   const [roleChangeTarget, setRoleChangeTarget] = useState<string | null>(null);
   const [passwordChangeTarget, setPasswordChangeTarget] = useState<string | null>(null);
   const [newPasswordInput, setNewPasswordInput] = useState('');
-  const [deleteUserConfirm, setDeleteUserConfirm] = useState<string | null>(null);
   const [userMessage, setUserMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showPersonalDetails, setShowPersonalDetails] = useState(false);
   const [showOwnerDetails, setShowOwnerDetails] = useState(false);
@@ -85,8 +83,6 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [createUserForm, setCreateUserForm] = useState({ displayName: '', email: '', password: '', role: 'user' as UserRole });
   const [selectedUser, setSelectedUser] = useState<UserAccount | null>(null);
-  const [isEditingUser, setIsEditingUser] = useState(false);
-  const [userEditForm, setUserEditForm] = useState({ displayName: '', email: '', role: '' as any });
 
   // Roles
   const [roles, setRoles] = useState<Role[]>(getRoles());
@@ -101,7 +97,6 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
   // Server info
   const [serverInfo, setServerInfo] = useState<ServerInfo>(getServerInfo());
   const [serverSaved, setServerSaved] = useState(false);
-  const [editingRuleIndex, setEditingRuleIndex] = useState<number | null>(null);
   const [editingRuleText, setEditingRuleText] = useState('');
   const [newRuleText, setNewRuleText] = useState('');
 
@@ -114,6 +109,9 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
   const [discordSaved, setDiscordSaved] = useState(false);
   const [googleConfig, setGoogleConfig] = useState<GoogleConfig>(getGoogleConfig());
   const [googleSaved, setGoogleSaved] = useState(false);
+  const [supabaseConfig, setSupabaseConfig] = useState<SupabaseConfig>(getSupabaseConfig());
+  const [supabaseSaved, setSupabaseSaved] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
   const [siteSettings, setSiteSettings] = useState(getSettings());
   const [settingsSaved, setSettingsSaved] = useState(false);
 
@@ -144,6 +142,7 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
     setAppForms(getAppForms());
     setDiscordConfig(getDiscordConfig());
     setGoogleConfig(getGoogleConfig());
+    setSupabaseConfig(getSupabaseConfig());
     setSiteSettings(getSettings());
     if (selectedApp) setCurrentChat(getChatByAppId(selectedApp.id));
   }, [selectedApp]);
@@ -226,7 +225,34 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
 
   const handleSaveDiscord = () => { saveDiscordConfig(discordConfig); setDiscordSaved(true); setTimeout(() => setDiscordSaved(false), 2000); };
   const handleSaveGoogle = () => { saveGoogleConfig(googleConfig); setGoogleSaved(true); setTimeout(() => setGoogleSaved(false), 2000); };
+  const handleSaveSupabase = () => { saveSupabaseConfig(supabaseConfig); setSupabaseSaved(true); setTimeout(() => setSupabaseSaved(false), 2000); };
   const handleSaveSiteSettings = () => { updateSettings(siteSettings); setSettingsSaved(true); setTimeout(() => setSettingsSaved(false), 2000); };
+
+  const handlePushToCloud = async () => {
+    setSyncLoading(true);
+    const res = await syncToCloud();
+    setSyncLoading(false);
+    if (res.success) {
+      setUserMessage({ type: 'success', text: 'Data pushed to cloud successfully.' });
+    } else {
+      setUserMessage({ type: 'error', text: res.error || 'Sync failed.' });
+    }
+    setTimeout(() => setUserMessage(null), 3000);
+  };
+
+  const handlePullFromCloud = async () => {
+    if (!confirm('This will overwrite your current local data. Continue?')) return;
+    setSyncLoading(true);
+    const res = await syncFromCloud();
+    setSyncLoading(false);
+    if (res.success) {
+      setUserMessage({ type: 'success', text: 'Data pulled from cloud. Refreshing...' });
+      setTimeout(() => window.location.reload(), 1500);
+    } else {
+      setUserMessage({ type: 'error', text: res.error || 'Sync failed.' });
+    }
+    setTimeout(() => setUserMessage(null), 3000);
+  };
 
   const handleStatusChange = (id: string, status: ApplicationStatus) => {
     updateApplication(id, { status, reviewedAt: new Date().toISOString() });
@@ -422,6 +448,7 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
     ...(canManageSettings(currentUser.role) ? [{ id: 'server' as Tab, icon: Server, label: 'Server' }] : []),
     ...(canManageSettings(currentUser.role) ? [{ id: 'formbuilder' as Tab, icon: FormInput, label: 'Form Builder' }] : []),
     ...(canManageSettings(currentUser.role) ? [{ id: 'socials' as Tab, icon: Link2, label: 'Socials' }] : []),
+    ...(canManageSettings(currentUser.role) ? [{ id: 'database' as Tab, icon: Database, label: 'Cloud Sync' }] : []),
     ...(canManageSettings(currentUser.role) ? [{ id: 'settings' as Tab, icon: Settings, label: 'Settings' }] : []),
   ];
 
@@ -762,6 +789,138 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
                   <button onClick={() => setShowNewSocialForm(true)} className="w-full py-12 border-2 border-dashed border-neutral-800 rounded-[3rem] text-neutral-700 hover:text-emerald-500 hover:border-emerald-500/20 transition-all flex flex-col items-center justify-center gap-3 group"><Plus size={32} className="group-hover:scale-125 transition-transform" /><span className="text-[9px] font-black uppercase tracking-[0.3em]">Integrate New Channel</span></button>}
                 </div>
                 <div className="lg:col-span-4 p-8 rounded-[2.5rem] bg-neutral-900/50 border border-neutral-800/50 shadow-2xl h-fit"><h3 className="text-white font-black text-xs uppercase tracking-widest mb-6">Channel Protocols</h3><div className="space-y-6">{[{ l: 'Global visibility', d: 'Links automatically populate all touchpoints.' }, { l: 'Status override', d: 'Deactivate feeds without erasing configurations.' }].map((t,i) => <div key={i} className="flex gap-4"><div className="h-8 w-8 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-500 shrink-0"><CheckCircle size={16} /></div><div><div className="text-white text-[10px] font-black uppercase mb-1">{t.l}</div><p className="text-neutral-500 text-[9px] leading-relaxed font-bold uppercase tracking-widest">{t.d}</p></div></div>)}</div></div>
+              </div>
+            </div>
+          )}
+
+          {/* CLOUD SYNC */}
+          {activeTab === 'database' && (
+            <div className="animate-fade-in space-y-10">
+              <div className="flex items-center justify-between">
+                <h1 className="text-3xl font-black text-white">Cloud Sync</h1>
+                <button 
+                  onClick={handleSaveSupabase} 
+                  className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest ${supabaseSaved ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-500 text-neutral-950'}`}
+                >
+                  {supabaseSaved ? 'CONFIG SAVED' : 'SAVE CONFIG'}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-10">
+                <div className="xl:col-span-8 space-y-10">
+                   <div className="p-10 rounded-[3rem] bg-neutral-900/50 border border-white/10 shadow-2xl space-y-8">
+                     <div className="flex items-center gap-4 mb-4">
+                       <div className="h-14 w-14 rounded-[2rem] bg-emerald-500/10 flex items-center justify-center text-emerald-500 border border-emerald-500/20 shadow-inner">
+                         <Database size={32} />
+                       </div>
+                       <div>
+                         <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Global Persistence</h3>
+                         <p className="text-[9px] font-black text-neutral-600 uppercase tracking-widest">Connect a shared database</p>
+                       </div>
+                     </div>
+
+                     <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6">
+                        <div className="flex items-start gap-4">
+                          <AlertCircle size={20} className="text-amber-500 shrink-0 mt-0.5" />
+                          <div className="space-y-2">
+                            <h4 className="text-white text-xs font-black uppercase tracking-widest">Why do I need this?</h4>
+                            <p className="text-neutral-400 text-[10px] leading-relaxed">By default, this website stores data in your browser's local storage. This means an application submitted on one computer won't be seen on another. To fix the "separate website for each user" issue, connect a Supabase database to sync all data globally across all devices.</p>
+                          </div>
+                        </div>
+                     </div>
+
+                     <div className="space-y-6">
+                        <div className="flex items-center justify-between p-4 bg-neutral-950 rounded-2xl border border-neutral-800">
+                          <span className="text-[10px] font-black text-neutral-600 uppercase">Cloud Synchronization</span>
+                          <button 
+                            onClick={() => setSupabaseConfig({...supabaseConfig, isEnabled: !supabaseConfig.isEnabled})} 
+                            className={`px-4 py-1.5 rounded-lg text-[8px] font-black uppercase transition-all ${supabaseConfig.isEnabled ? 'bg-emerald-500 text-neutral-950' : 'bg-neutral-800 text-neutral-500'}`}
+                          >
+                            {supabaseConfig.isEnabled ? 'ENABLED' : 'DISABLED'}
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-5">
+                           <div>
+                             <label className={labelClass}>Supabase Project URL</label>
+                             <input 
+                               type="text" 
+                               value={supabaseConfig.url} 
+                               onChange={e => setSupabaseConfig({...supabaseConfig, url: e.target.value})} 
+                               className={`${inputClass} !py-4 !text-xs font-mono`} 
+                               placeholder="https://xxxxxx.supabase.co"
+                             />
+                           </div>
+                           <div>
+                             <label className={labelClass}>Supabase Anon Key</label>
+                             <input 
+                               type="password" 
+                               value={supabaseConfig.key} 
+                               onChange={e => setSupabaseConfig({...supabaseConfig, key: e.target.value})} 
+                               className={`${inputClass} !py-4 !text-xs font-mono`} 
+                               placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                             />
+                           </div>
+                        </div>
+                     </div>
+                   </div>
+
+                   {supabaseConfig.isEnabled && (
+                     <div className="p-10 rounded-[3rem] bg-emerald-500/5 border border-emerald-500/20 shadow-2xl space-y-8">
+                        <div className="flex items-center gap-4">
+                          <Cloud size={24} className="text-emerald-500" />
+                          <h3 className="text-xl font-black text-white uppercase tracking-tighter">Manual Sync Controls</h3>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                           <button 
+                             onClick={handlePushToCloud}
+                             disabled={syncLoading}
+                             className="flex flex-col items-center justify-center gap-4 p-8 rounded-[2rem] bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all group disabled:opacity-50"
+                           >
+                             <RefreshCw size={24} className={`text-emerald-500 ${syncLoading ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+                             <div className="text-center">
+                               <div className="text-white text-[10px] font-black uppercase tracking-widest mb-1">Push to Cloud</div>
+                               <div className="text-[8px] text-neutral-500 font-bold uppercase tracking-widest">Update cloud with local data</div>
+                             </div>
+                           </button>
+
+                           <button 
+                             onClick={handlePullFromCloud}
+                             disabled={syncLoading}
+                             className="flex flex-col items-center justify-center gap-4 p-8 rounded-[2rem] bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20 transition-all group disabled:opacity-50"
+                           >
+                             <Cloud size={24} className={`text-blue-500 ${syncLoading ? 'animate-pulse' : ''}`} />
+                             <div className="text-center">
+                               <div className="text-white text-[10px] font-black uppercase tracking-widest mb-1">Pull from Cloud</div>
+                               <div className="text-[8px] text-neutral-500 font-bold uppercase tracking-widest">Override local with cloud data</div>
+                             </div>
+                           </button>
+                        </div>
+                     </div>
+                   )}
+                </div>
+
+                <div className="xl:col-span-4 p-8 rounded-[2.5rem] bg-neutral-900/50 border border-neutral-800/50 shadow-2xl h-fit">
+                   <h3 className="text-white font-black text-xs uppercase tracking-widest mb-6">Sync Guide</h3>
+                   <div className="space-y-6">
+                      {[
+                        { l: '1. Create Project', d: 'Go to supabase.com and create a free project.' },
+                        { l: '2. Setup Table', d: 'Create a table named "site_sync" with columns "id" (text, primary) and "data" (jsonb).' },
+                        { l: '3. Disable RLS', d: 'For this prototype, disable Row Level Security on "site_sync" or add a public access policy.' },
+                        { l: '4. Connect', d: 'Copy your Project URL and Anon Key into the fields on the left and Enable Sync.' },
+                        { l: '5. Initial Push', d: 'Click "Push to Cloud" to upload your current settings and users to the shared database.' }
+                      ].map((t,i) => (
+                        <div key={i} className="flex gap-4">
+                          <div className="h-6 w-6 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500 text-[10px] font-black shrink-0">{i+1}</div>
+                          <div>
+                            <div className="text-white text-[10px] font-black uppercase mb-1">{t.l}</div>
+                            <p className="text-neutral-500 text-[8px] leading-relaxed font-bold uppercase tracking-widest">{t.d}</p>
+                          </div>
+                        </div>
+                      ))}
+                   </div>
+                </div>
               </div>
             </div>
           )}
