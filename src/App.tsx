@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { Navbar } from './components/Navbar';
 import { Hero } from './components/Hero';
 import { SeasonBanner } from './components/SeasonBanner';
@@ -89,50 +90,59 @@ export function App() {
   // Auth page
   if (route === 'auth') {
     return (
-      <AuthPage
-        onAuth={() => {
-          forceRefresh();
-          const user = getSession();
-          if (window.location.hash === '#admin' && user && canAccessAdmin(user.role)) {
-            navigateTo('admin-dashboard');
-          } else {
-            navigateTo('portal');
-          }
-        }}
-        onBack={() => navigateTo('home')}
-      />
+      <>
+        <AuthPage
+          onAuth={() => {
+            forceRefresh();
+            const user = getSession();
+            if (window.location.hash === '#admin' && user && canAccessAdmin(user.role)) {
+              navigateTo('admin-dashboard');
+            } else {
+              navigateTo('portal');
+            }
+          }}
+          onBack={() => navigateTo('home')}
+        />
+        <Analytics />
+      </>
     );
   }
 
   // User portal
   if (route === 'portal') {
     return (
-      <UserPortal
-        onBack={() => navigateTo('home')}
-        onLogout={() => {
-          forceRefresh();
-          navigateTo('home');
-        }}
-        onApply={() => {
-          navigateTo('home');
-          setTimeout(() => {
-            document.getElementById('apply')?.scrollIntoView({ behavior: 'smooth' });
-          }, 100);
-        }}
-      />
+      <>
+        <UserPortal
+          onBack={() => navigateTo('home')}
+          onLogout={() => {
+            forceRefresh();
+            navigateTo('home');
+          }}
+          onApply={() => {
+            navigateTo('home');
+            setTimeout(() => {
+              document.getElementById('apply')?.scrollIntoView({ behavior: 'smooth' });
+            }, 100);
+          }}
+        />
+        <Analytics />
+      </>
     );
   }
 
   // Admin login
   if (route === 'admin-login') {
     return (
-      <AdminLogin
-        onLogin={() => {
-          forceRefresh();
-          setRoute('admin-dashboard');
-        }}
-        onBack={() => navigateTo('home')}
-      />
+      <>
+        <AdminLogin
+          onLogin={() => {
+            forceRefresh();
+            setRoute('admin-dashboard');
+          }}
+          onBack={() => navigateTo('home')}
+        />
+        <Analytics />
+      </>
     );
   }
 
@@ -141,26 +151,32 @@ export function App() {
     const user = getSession();
     if (!user || !canAccessAdmin(user.role)) {
       return (
-        <AdminLogin
-          onLogin={() => {
-            forceRefresh();
-            setRoute('admin-dashboard');
-          }}
-          onBack={() => navigateTo('home')}
-        />
+        <>
+          <AdminLogin
+            onLogin={() => {
+              forceRefresh();
+              setRoute('admin-dashboard');
+            }}
+            onBack={() => navigateTo('home')}
+          />
+          <Analytics />
+        </>
       );
     }
 
     return (
-      <AdminDashboard
-        currentUser={user}
-        onLogout={() => {
-          clearSession();
-          forceRefresh();
-          navigateTo('home');
-        }}
-        onBack={() => navigateTo('home')}
-      />
+      <>
+        <AdminDashboard
+          currentUser={user}
+          onLogout={() => {
+            clearSession();
+            forceRefresh();
+            navigateTo('home');
+          }}
+          onBack={() => navigateTo('home')}
+        />
+        <Analytics />
+      </>
     );
   }
 
@@ -204,6 +220,7 @@ export function App() {
 
       {/* 10. Footer */}
       <Footer onAdminClick={isStaff ? () => navigateTo('admin-dashboard') : undefined} />
+      <Analytics />
     </div>
   );
 }
