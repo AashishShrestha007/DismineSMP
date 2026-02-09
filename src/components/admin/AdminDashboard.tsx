@@ -8,16 +8,17 @@ import {
   Youtube, Instagram, Twitter, Twitch, Linkedin, Github, Facebook, Music, Video, Gamepad2, Mail,
   Heart, Star, Sword, Wrench, LifeBuoy, Zap
 } from 'lucide-react';
-import {
+import { 
   getApplications, updateApplication, deleteApplication, getStats,
   getUsers, updateUserRole, deleteUser, getSocialLinks,
   updateSocialLinks, getServerInfo, updateServerInfo, getSeasonInfo,
   saveSeasonInfo, getAppForms, saveAppForms, getSettings, updateSettings,
-  canManageRoles, canDeleteUsers, canManageSettings, canReviewApplications, 
+  canManageRoles, canManageSettings, canReviewApplications, 
   getDiscordConfig, saveDiscordConfig, getGoogleConfig, saveGoogleConfig,
   getRoleLabel, updateUserPassword, updateUserInfo,
   getChatByAppId, saveChatMessage, toggleChatStatus, deleteChat,
   getRoles, saveRole, deleteRole, getRoleStyle, BUILTIN_ROLES,
+  generateMemberId, updateUserMemberId, adminCreateUser,
   type ApplicationEntry, type ApplicationStatus, type UserAccount,
   type UserRole, type SocialLink, type ServerInfo, type SeasonInfo, type AppField, type DiscordConfig, type GoogleConfig,
   type AppForm, type ApplicationChat, type Role, type Permission
@@ -80,7 +81,9 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
   const [showDiscordDetails, setShowDiscordDetails] = useState(false);
   const [showGoogleDetails, setShowGoogleDetails] = useState(false);
 
-  // User details management
+  // User creation and management
+  const [showCreateUserModal, setShowCreateUserModal] = useState(false);
+  const [createUserForm, setCreateUserForm] = useState({ displayName: '', email: '', password: '', role: 'user' as UserRole });
   const [selectedUser, setSelectedUser] = useState<UserAccount | null>(null);
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [userEditForm, setUserEditForm] = useState({ displayName: '', email: '', role: '' as any });
@@ -269,6 +272,46 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
     else { setUserMessage({ type: 'error', text: result.error || 'Failed.' }); }
     setPasswordChangeTarget(null);
     setNewPasswordInput('');
+    setTimeout(() => setUserMessage(null), 3000);
+  };
+
+  const handleAdminCreateUser = () => {
+    const { displayName, email, password, role } = createUserForm;
+    if (!displayName || !email || !password) {
+      setUserMessage({ type: 'error', text: 'Please fill in all fields.' });
+      return;
+    }
+    
+    const result = adminCreateUser({
+      displayName,
+      email,
+      password,
+      authMethod: 'email',
+      role,
+      memberId: generateMemberId(),
+      status: 'active'
+    });
+
+    if (result.success) {
+      setUserMessage({ type: 'success', text: 'User account created.' });
+      setShowCreateUserModal(false);
+      setCreateUserForm({ displayName: '', email: '', password: '', role: 'user' });
+      refreshData();
+    } else {
+      setUserMessage({ type: 'error', text: result.error || 'Failed to create user.' });
+    }
+    setTimeout(() => setUserMessage(null), 3000);
+  };
+
+  const handleGenerateMemberId = (userId: string) => {
+    const newId = generateMemberId();
+    const result = updateUserMemberId(userId, newId, currentUser);
+    if (result.success) {
+      setUserMessage({ type: 'success', text: `ID ${newId} assigned.` });
+      refreshData();
+    } else {
+      setUserMessage({ type: 'error', text: result.error || 'Failed to assign ID.' });
+    }
     setTimeout(() => setUserMessage(null), 3000);
   };
 
@@ -579,9 +622,41 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
           {/* USERS */}
           {activeTab === 'users' && (
             <div className="animate-fade-in space-y-8">
-              <h1 className="text-3xl font-black text-white">Registry</h1>
+              <div className="flex items-center justify-between">
+                <h1 className="text-3xl font-black text-white">Registry</h1>
+                <button 
+                  onClick={() => setShowCreateUserModal(true)}
+                  className="px-6 py-2.5 bg-emerald-500 text-neutral-950 text-[10px] font-black rounded-xl uppercase tracking-widest hover:bg-emerald-400 transition-all flex items-center gap-2"
+                >
+                  <Plus size={14} /> Create User
+                </button>
+              </div>
               {userMessage && <div className={`flex items-center gap-3 px-6 py-3 rounded-2xl border text-[10px] font-black uppercase tracking-widest ${userMessage.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}><AlertTriangle size={14} /> {userMessage.text}</div>}
               <div className="relative"><Search size={18} className="absolute left-5 top-1/2 -translate-y-1/2 text-neutral-700" /><input type="text" placeholder="Search..." value={userSearchQuery} onChange={e => setUserSearchQuery(e.target.value)} className={`${inputClass} !pl-14`} /></div>
+              
+              {showCreateUserModal && (
+                <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[60] flex items-center justify-center p-4">
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-[2.5rem] p-8 max-w-lg w-full animate-in zoom-in-95 duration-200">
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-2xl font-black text-white uppercase tracking-tight">Manual Registry</h2>
+                      <button onClick={() => setShowCreateUserModal(false)} className="text-neutral-500 hover:text-white transition-colors"><X size={20} /></button>
+                    </div>
+                    <div className="space-y-4 mb-8">
+                       <div><label className={labelClass}>Display Name</label><input type="text" value={createUserForm.displayName} onChange={e => setCreateUserForm({...createUserForm, displayName: e.target.value})} className={inputClass} placeholder="Full Name" /></div>
+                       <div><label className={labelClass}>Email Address</label><input type="email" value={createUserForm.email} onChange={e => setCreateUserForm({...createUserForm, email: e.target.value})} className={inputClass} placeholder="user@example.com" /></div>
+                       <div><label className={labelClass}>Temporary Password</label><input type="text" value={createUserForm.password} onChange={e => setCreateUserForm({...createUserForm, password: e.target.value})} className={inputClass} placeholder="Secret Passphrase" /></div>
+                       <div><label className={labelClass}>Designation</label><select value={createUserForm.role} onChange={e => setCreateUserForm({...createUserForm, role: e.target.value as UserRole})} className={inputClass}>
+                         {roles.map(r => <option key={r.id} value={r.id}>{r.name.toUpperCase()}</option>)}
+                       </select></div>
+                    </div>
+                    <div className="flex gap-4">
+                      <button onClick={handleAdminCreateUser} className="flex-1 py-4 bg-emerald-500 text-neutral-950 font-black rounded-2xl uppercase text-[10px] tracking-widest shadow-xl">ESTABLISH ACCOUNT</button>
+                      <button onClick={() => setShowCreateUserModal(false)} className="flex-1 py-4 bg-neutral-800 text-neutral-400 font-bold rounded-2xl uppercase text-[10px] tracking-widest">CANCEL</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="rounded-[2rem] bg-neutral-900/50 border border-neutral-800/50 overflow-hidden shadow-2xl divide-y divide-neutral-800/50">
                 {filteredUsers.map(u => {
                   const s = getRoleStyle(u.role);
@@ -591,8 +666,15 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
                       <div className="flex items-center gap-2">
                         {roleChangeTarget === u.id ? <div className="flex gap-1">{roles.filter(r => r.id !== 'owner' && r.id !== u.role).map(r => <button key={r.id} onClick={() => handleRoleChange(u.id, r.id)} className="text-[8px] font-black px-2 py-1 rounded-md border border-neutral-700 text-neutral-400 hover:text-white">{r.name.toUpperCase()}</button>)}<button onClick={() => setRoleChangeTarget(null)} className="text-[8px] font-black text-neutral-600 px-2 uppercase tracking-widest">X</button></div> : 
                         passwordChangeTarget === u.id ? <div className="flex gap-2"><input type="text" value={newPasswordInput} onChange={e => setNewPasswordInput(e.target.value)} placeholder="New Secret" className="bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-1 text-[10px] w-24" /><button onClick={() => handleUpdatePassword(u.id)} className="text-[8px] font-black px-2 py-1 bg-emerald-500 text-neutral-950 rounded-md">RESET</button><button onClick={() => setPasswordChangeTarget(null)} className="text-[8px] text-neutral-600">X</button></div> :
-                        <><span style={{ color: s.color, backgroundColor: s.backgroundColor, borderColor: s.borderColor }} className="text-[9px] font-black px-3 py-1 rounded-full border uppercase tracking-widest shrink-0">{getRoleLabel(u.role)}</span>
-                        {u.role !== 'owner' && <><button onClick={() => setRoleChangeTarget(u.id)} className="p-2 text-neutral-500 hover:text-blue-400"><Shield size={16} /></button>{u.authMethod === 'email' && <button onClick={() => setPasswordChangeTarget(u.id)} className="p-2 text-neutral-500 hover:text-amber-400"><Lock size={16} /></button>}<button onClick={() => { if (confirm('Delete user?')) handleDeleteUser(u.id); }} className="p-2 text-neutral-500 hover:text-red-400"><Trash2 size={16} /></button></>}</>}
+                        <div className="flex items-center gap-3">
+                          {u.memberId ? (
+                            <span className="text-[10px] font-mono text-neutral-500 bg-neutral-950 px-2 py-1 rounded border border-neutral-800">{u.memberId}</span>
+                          ) : (
+                            <button onClick={() => handleGenerateMemberId(u.id)} className="text-[8px] font-black px-2 py-1 bg-neutral-800 text-neutral-400 hover:text-white rounded border border-neutral-700 uppercase tracking-widest transition-all">Assign ID</button>
+                          )}
+                          <span style={{ color: s.color, backgroundColor: s.backgroundColor, borderColor: s.borderColor }} className="text-[9px] font-black px-3 py-1 rounded-full border uppercase tracking-widest shrink-0">{getRoleLabel(u.role)}</span>
+                          {u.role !== 'owner' && <><button onClick={() => setRoleChangeTarget(u.id)} className="p-2 text-neutral-500 hover:text-blue-400"><Shield size={16} /></button>{u.authMethod === 'email' && <button onClick={() => setPasswordChangeTarget(u.id)} className="p-2 text-neutral-500 hover:text-amber-400"><Lock size={16} /></button>}<button onClick={() => { if (confirm('Delete user?')) handleDeleteUser(u.id); }} className="p-2 text-neutral-500 hover:text-red-400"><Trash2 size={16} /></button></>}
+                        </div>}
                       </div>
                     </div>
                   );

@@ -53,6 +53,7 @@ export interface UserAccount {
   password?: string;
   authMethod: 'discord' | 'google' | 'email';
   role: UserRole; // Can be a string ID for custom roles
+  memberId?: string; // Community ID like M-1234
   createdAt: string;
   status?: 'active' | 'banned';
 }
@@ -302,6 +303,25 @@ export function ensureOwnerAccount(): void {
   }
 }
 
+export function adminCreateUser(user: Omit<UserAccount, 'id' | 'createdAt'>): { success: boolean; error?: string; user?: UserAccount } {
+  const users = getUsers();
+  
+  if (user.authMethod === 'email' && user.email) {
+    const exists = users.find((u) => u.email === user.email && u.authMethod === 'email');
+    if (exists) return { success: false, error: 'An account with this email already exists.' };
+  }
+
+  const newUser: UserAccount = {
+    ...user,
+    id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    createdAt: new Date().toISOString(),
+  };
+  
+  users.push(newUser);
+  saveUsers(users);
+  return { success: true, user: newUser };
+}
+
 export function registerUser(user: Omit<UserAccount, 'id' | 'createdAt' | 'role'>): { success: boolean; error?: string; user?: UserAccount } {
   const users = getUsers();
   const settings = getSettings();
@@ -467,6 +487,26 @@ export function updateUserPassword(userId: string, newPassword: string, actingUs
   return { success: true };
 }
 
+export function generateMemberId(): string {
+  const prefix = 'DIS';
+  const num = Math.floor(1000 + Math.random() * 9000);
+  return `${prefix}-${num}`;
+}
+
+export function updateUserMemberId(userId: string, memberId: string, actingUser: UserAccount): { success: boolean; error?: string } {
+  if (!canAccessAdmin(actingUser.role)) {
+    return { success: false, error: 'You do not have permission to perform this action.' };
+  }
+
+  const users = getUsers();
+  const target = users.find((u) => u.id === userId);
+  if (!target) return { success: false, error: 'User not found.' };
+
+  target.memberId = memberId;
+  saveUsers(users);
+  return { success: true };
+}
+
 export function updateUserInfo(userId: string, data: Partial<UserAccount>, actingUser: UserAccount): { success: boolean; error?: string } {
   if (!canManageRoles(actingUser.role)) {
     return { success: false, error: 'You do not have permission to update user info.' };
@@ -484,6 +524,7 @@ export function updateUserInfo(userId: string, data: Partial<UserAccount>, actin
   if (data.displayName) target.displayName = data.displayName;
   if (data.email) target.email = data.email;
   if (data.status) target.status = data.status;
+  if (data.memberId !== undefined) target.memberId = data.memberId;
   
   saveUsers(users);
   return { success: true };

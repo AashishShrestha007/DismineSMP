@@ -451,6 +451,11 @@ export function UserPortal({ onBack, onLogout, onApply }: Props) {
                   <Hash size={10} />
                   {user.id.slice(0, 8)}
                 </span>
+                {user.memberId && (
+                  <span className="inline-flex items-center gap-1.5 text-xs text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/10 font-mono font-bold">
+                    ID: {user.memberId}
+                  </span>
+                )}
               </div>
 
               {canAccessAdmin(user.role) && (
