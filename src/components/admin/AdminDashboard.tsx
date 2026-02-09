@@ -16,7 +16,7 @@ import {
   canManageRoles, canManageSettings, canReviewApplications, 
   getDiscordConfig, saveDiscordConfig, getGoogleConfig, saveGoogleConfig,
   getRoleLabel, updateUserPassword, updateUserInfo,
-  getChatByAppId, saveChatMessage, toggleChatStatus, deleteChat,
+  getChatByAppId, saveChatMessage, toggleChatStatus,
   getRoles, saveRole, deleteRole, getRoleStyle, BUILTIN_ROLES,
   generateMemberId, updateUserMemberId, adminCreateUser,
   getSupabaseConfig, saveSupabaseConfig, syncToCloud, syncFromCloud,
@@ -79,10 +79,12 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
   const [showDiscordDetails, setShowDiscordDetails] = useState(false);
   const [showGoogleDetails, setShowGoogleDetails] = useState(false);
 
-  // User creation and management
+  // User management
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
   const [createUserForm, setCreateUserForm] = useState({ displayName: '', email: '', password: '', role: 'user' as UserRole });
   const [selectedUser, setSelectedUser] = useState<UserAccount | null>(null);
+  const [userEditForm, setUserEditForm] = useState<Partial<UserAccount>>({});
+  const [isEditingUser, setIsEditingUser] = useState(false);
 
   // Roles
   const [roles, setRoles] = useState<Role[]>(getRoles());
@@ -97,6 +99,7 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
   // Server info
   const [serverInfo, setServerInfo] = useState<ServerInfo>(getServerInfo());
   const [serverSaved, setServerSaved] = useState(false);
+  const [editingRuleIndex, setEditingRuleIndex] = useState<number | null>(null);
   const [editingRuleText, setEditingRuleText] = useState('');
   const [newRuleText, setNewRuleText] = useState('');
 
@@ -217,12 +220,6 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
     setCurrentChat(getChatByAppId(selectedApp.id));
   };
 
-  const handleDeleteChat = () => {
-    if (!selectedApp || !confirm('Delete conversation?')) return;
-    deleteChat(selectedApp.id);
-    setCurrentChat(null);
-  };
-
   const handleSaveDiscord = () => { saveDiscordConfig(discordConfig); setDiscordSaved(true); setTimeout(() => setDiscordSaved(false), 2000); };
   const handleSaveGoogle = () => { saveGoogleConfig(googleConfig); setGoogleSaved(true); setTimeout(() => setGoogleSaved(false), 2000); };
   const handleSaveSupabase = () => { saveSupabaseConfig(supabaseConfig); setSupabaseSaved(true); setTimeout(() => setSupabaseSaved(false), 2000); };
@@ -268,10 +265,11 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
     setNoteInput('');
   };
 
-  const handleDelete = (id: string) => {
+  const handleDeleteApp = (id: string) => {
+    if (!confirm('Delete this application?')) return;
     deleteApplication(id);
+    setSelectedApps(prev => prev.filter(i => i !== id));
     refreshData();
-    setShowDeleteConfirm(null);
     if (selectedApp?.id === id) setSelectedApp(null);
   };
 
@@ -287,7 +285,6 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
     const result = deleteUser(userId, currentUser);
     if (result.success) { setUserMessage({ type: 'success', text: 'User deleted.' }); refreshData(); }
     else { setUserMessage({ type: 'error', text: result.error || 'Failed.' }); }
-    setDeleteUserConfirm(null);
     setTimeout(() => setUserMessage(null), 3000);
   };
 
@@ -343,7 +340,7 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
 
   const handleUpdateUser = () => {
     if (!selectedUser) return;
-    if (userEditForm.role !== selectedUser.role) updateUserRole(selectedUser.id, userEditForm.role, currentUser);
+    if (userEditForm.role && userEditForm.role !== selectedUser.role) updateUserRole(selectedUser.id, userEditForm.role, currentUser);
     const result = updateUserInfo(selectedUser.id, { displayName: userEditForm.displayName, email: userEditForm.email }, currentUser);
     if (result.success) {
       setIsEditingUser(false); refreshData(); setUserMessage({ type: 'success', text: 'User updated.' }); setTimeout(() => setUserMessage(null), 3000);
@@ -380,7 +377,16 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
   const handleSaveSeasonInfo = () => { saveSeasonInfo(seasonInfo); setSeasonSaved(true); setTimeout(() => setSeasonSaved(false), 2000); };
 
   const handleAddRule = () => { if (!newRuleText.trim()) return; setServerInfo((p) => ({ ...p, rules: [...p.rules, newRuleText.trim()] })); setNewRuleText(''); };
-  const handleEditRule = (index: number) => { if (!editingRuleText.trim()) return; setServerInfo((p) => { const r = [...p.rules]; r[index] = editingRuleText.trim(); return { ...p, rules: r }; }); setEditingRuleIndex(null); setEditingRuleText(''); };
+  const handleEditRule = (index: number) => { 
+    if (!editingRuleText.trim()) return; 
+    setServerInfo((p) => { 
+      const r = [...p.rules]; 
+      r[index] = editingRuleText.trim(); 
+      return { ...p, rules: r }; 
+    }); 
+    setEditingRuleIndex(null); 
+    setEditingRuleText(''); 
+  };
   const handleDeleteRule = (index: number) => { setServerInfo((p) => ({ ...p, rules: p.rules.filter((_, i) => i !== index) })); };
 
   const handleSaveForms = (updatedForms: AppForm[]) => { saveAppForms(updatedForms); setAppForms(updatedForms); setFieldsSaved(true); setTimeout(() => setFieldsSaved(false), 2000); };
@@ -394,11 +400,6 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
     setShowNewFormModal(false);
     setNewFormName('');
     setNewFormDesc('');
-  };
-
-  const handleDeleteForm = (id: string) => {
-    if (id === 'member-app') return alert('Cannot delete default form.');
-    if (confirm('Delete this form?')) { const updated = appForms.filter(f => f.id !== id); handleSaveForms(updated); setSelectedFormId('member-app'); }
   };
 
   const handleMoveField = (index: number, direction: 'up' | 'down') => {
@@ -515,7 +516,16 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
           {/* OVERVIEW */}
           {activeTab === 'overview' && (
             <div className="animate-fade-in space-y-10">
-              <h1 className="text-3xl font-black text-white">Dashboard</h1>
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <h1 className="text-3xl font-black text-white">Dashboard</h1>
+                {!supabaseConfig.isEnabled && (
+                  <div className="px-4 py-2 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center gap-3">
+                    <AlertCircle size={14} className="text-amber-500" />
+                    <span className="text-[10px] font-black uppercase text-amber-500 tracking-widest">Local Mode Only — Data will not sync between users</span>
+                    <button onClick={() => setActiveTab('database')} className="text-[10px] font-black underline uppercase text-white hover:text-amber-400">Setup Cloud Sync</button>
+                  </div>
+                )}
+              </div>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 {[{ label: 'Total', v: stats.total, i: Users, c: 'text-neutral-300', b: 'bg-neutral-800' }, { label: 'Pending', v: stats.pending, i: Clock, c: 'text-amber-400', b: 'bg-amber-500/10' }, { label: 'Approved', v: stats.approved, i: CheckCircle, c: 'text-emerald-400', b: 'bg-emerald-500/10' }, { label: 'Rejected', v: stats.rejected, i: XCircle, c: 'text-red-400', b: 'bg-red-500/10' }].map((s) => (
                   <div key={s.label} className="p-6 rounded-3xl bg-neutral-900/50 border border-neutral-800/50">
@@ -641,6 +651,7 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
                    </div></div>
                    <div className="p-8 rounded-[2.5rem] bg-neutral-900/50 border border-neutral-800/50"><h3 className="text-white font-black text-xs uppercase tracking-widest mb-4">Internal Notes</h3><textarea value={noteInput} onChange={e => setNoteInput(e.target.value)} rows={3} placeholder="Reviewer log..." className={`${inputClass} !py-3 !text-xs resize-none`} /><button onClick={() => handleAddNote(selectedApp.id)} disabled={!noteInput.trim()} className="mt-2 w-full py-3 bg-neutral-800 text-white font-black text-[9px] rounded-xl border border-neutral-700 uppercase tracking-widest disabled:opacity-20">SAVE LOG</button></div>
                    <div className="p-8 rounded-[2.5rem] bg-neutral-900/50 border border-emerald-500/10"><h3 className="text-white font-black text-xs uppercase tracking-widest mb-1 flex items-center gap-2">Public Notice</h3><p className="text-[8px] font-bold text-neutral-600 uppercase tracking-widest mb-4">Visible to applicant</p><textarea value={messageInput} onChange={e => setMessageInput(e.target.value)} rows={3} placeholder="System notice..." className={`${inputClass} !py-3 !text-xs resize-none`} /><button onClick={() => { if (!messageInput.trim()) return; updateApplication(selectedApp.id, { adminMessage: messageInput.trim() }); refreshData(); setSelectedApp({...selectedApp, adminMessage: messageInput.trim()}); setMessageInput(''); }} disabled={!messageInput.trim()} className="mt-2 w-full py-3 bg-emerald-500/10 text-emerald-400 font-black text-[9px] rounded-xl border border-emerald-500/20 uppercase tracking-widest disabled:opacity-20">TRANSMIT</button></div>
+                   <div className="p-4 bg-red-500/5 border border-red-500/10 rounded-2xl"><button onClick={() => handleDeleteApp(selectedApp.id)} className="w-full py-3 text-red-500 font-black text-[9px] uppercase tracking-widest hover:bg-red-500/10 rounded-xl transition-all">TERMINATE SUBMISSION</button></div>
                  </div>
               </div>
             </div>
@@ -659,7 +670,18 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
                 </button>
               </div>
               {userMessage && <div className={`flex items-center gap-3 px-6 py-3 rounded-2xl border text-[10px] font-black uppercase tracking-widest ${userMessage.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}><AlertTriangle size={14} /> {userMessage.text}</div>}
-              <div className="relative"><Search size={18} className="absolute left-5 top-1/2 -translate-y-1/2 text-neutral-700" /><input type="text" placeholder="Search..." value={userSearchQuery} onChange={e => setUserSearchQuery(e.target.value)} className={`${inputClass} !pl-14`} /></div>
+              <div className="flex items-center gap-4">
+                <div className="relative flex-1">
+                  <Search size={18} className="absolute left-5 top-1/2 -translate-y-1/2 text-neutral-700" />
+                  <input type="text" placeholder="Search members..." value={userSearchQuery} onChange={e => setUserSearchQuery(e.target.value)} className={`${inputClass} !pl-14`} />
+                </div>
+                <button 
+                  onClick={() => setShowPersonalDetails(!showPersonalDetails)} 
+                  className={`flex items-center gap-2 px-4 py-3 rounded-xl border transition-all text-[10px] font-black uppercase tracking-widest ${showPersonalDetails ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}
+                >
+                  {showPersonalDetails ? <><EyeOff size={14} /> Mask Personal Details</> : <><Eye size={14} /> Reveal Personal Details</>}
+                </button>
+              </div>
               
               {showCreateUserModal && (
                 <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[60] flex items-center justify-center p-4">
@@ -684,16 +706,59 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
                 </div>
               )}
 
+              {selectedUser && (
+                <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-[60] flex items-center justify-center p-4">
+                  <div className="bg-neutral-900 border border-neutral-800 rounded-[2.5rem] p-8 max-w-lg w-full animate-in zoom-in-95 duration-200">
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-2xl font-black text-white uppercase tracking-tight">Identity Management</h2>
+                      <button onClick={() => { setSelectedUser(null); setIsEditingUser(false); }} className="text-neutral-500 hover:text-white transition-colors"><X size={20} /></button>
+                    </div>
+                    {isEditingUser ? (
+                      <div className="space-y-4 mb-8">
+                        <div><label className={labelClass}>Name</label><input type="text" value={userEditForm.displayName || ''} onChange={e => setUserEditForm({...userEditForm, displayName: e.target.value})} className={inputClass} /></div>
+                        <div><label className={labelClass}>Email</label><input type="email" value={userEditForm.email || ''} onChange={e => setUserEditForm({...userEditForm, email: e.target.value})} className={inputClass} /></div>
+                        <div><label className={labelClass}>Rank</label><select value={userEditForm.role || 'user'} onChange={e => setUserEditForm({...userEditForm, role: e.target.value})} className={inputClass}>{roles.map(r => <option key={r.id} value={r.id}>{r.name.toUpperCase()}</option>)}</select></div>
+                      </div>
+                    ) : (
+                      <div className="space-y-6 mb-8">
+                        <div className="flex items-center gap-6"><div className="h-20 w-20 rounded-3xl bg-neutral-800 flex items-center justify-center text-3xl font-black text-neutral-400 border border-neutral-700">{selectedUser.displayName.slice(0, 2)}</div><div><h3 className="text-2xl font-black text-white">{selectedUser.displayName}</h3><div className="text-emerald-500 text-[10px] font-black uppercase tracking-widest">{getRoleLabel(selectedUser.role)}</div></div></div>
+                        <div className="grid grid-cols-2 gap-3">{[{ l: 'ID', v: selectedUser.id.slice(0, 8) }, { l: 'Joined', v: new Date(selectedUser.createdAt).toLocaleDateString() }, { l: 'Status', v: selectedUser.status || 'Active' }, { l: 'Method', v: selectedUser.authMethod }].map(s => <div key={s.l} className="p-3 bg-neutral-950 border border-neutral-800 rounded-xl"><div className="text-[8px] font-black text-neutral-600 uppercase mb-1">{s.l}</div><div className="text-white text-[10px] font-bold uppercase">{s.v}</div></div>)}</div>
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-3">
+                      {isEditingUser ? <button onClick={handleUpdateUser} className="w-full py-4 bg-emerald-500 text-neutral-950 font-black rounded-2xl uppercase text-[10px] tracking-widest">SAVE IDENTITY</button> : <button onClick={() => { setIsEditingUser(true); setUserEditForm(selectedUser); }} className="w-full py-4 bg-neutral-800 text-white font-black rounded-2xl uppercase text-[10px] tracking-widest border border-neutral-700">EDIT PROFILE</button>}
+                      <button onClick={() => handleToggleUserStatus(selectedUser)} className={`w-full py-4 font-black rounded-2xl uppercase text-[10px] tracking-widest ${selectedUser.status === 'banned' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>{selectedUser.status === 'banned' ? 'LIFT SUSPENSION' : 'SUSPEND ACCESS'}</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="rounded-[2rem] bg-neutral-900/50 border border-neutral-800/50 overflow-hidden shadow-2xl divide-y divide-neutral-800/50">
                 {filteredUsers.map(u => {
                   const s = getRoleStyle(u.role);
+                  const isCurrentUser = u.id === currentUser.id;
+                  const isOwner = u.role === 'owner';
                   return (
                     <div key={u.id} className="group px-8 py-5 flex items-center justify-between hover:bg-neutral-800/10 transition-colors">
-                      <div className="flex items-center gap-4"><div className="h-10 w-10 rounded-xl bg-neutral-800 flex items-center justify-center text-[10px] font-black text-white uppercase border border-neutral-700/50 shrink-0">{u.displayName.slice(0, 2)}</div><div className="min-w-0"><h3 className="text-white font-bold truncate">{u.displayName}</h3><div className={`text-[9px] font-bold uppercase tracking-widest ${!showPersonalDetails && u.id !== currentUser.id ? 'blur-[4px]' : 'text-neutral-500'}`}>{u.email || u.discordUsername}</div></div></div>
+                      <div className="flex items-center gap-4">
+                        <div className="h-10 w-10 rounded-xl bg-neutral-800 flex items-center justify-center text-[10px] font-black text-white uppercase border border-neutral-700/50 shrink-0">
+                          {u.discordAvatar ? <img src={u.discordAvatar} alt="" className="h-full w-full rounded-xl object-cover" /> : u.displayName.slice(0, 2)}
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="text-white font-bold truncate">{u.displayName}</h3>
+                          <div className={`text-[9px] font-bold uppercase tracking-widest flex items-center gap-2 ${(!showPersonalDetails && !isCurrentUser && !isOwner) ? 'blur-[4px] select-none' : 'text-neutral-500'}`}>
+                            {u.email || u.discordUsername}
+                            {u.authMethod !== 'email' && (
+                              <span className="text-[7px] bg-neutral-800 px-1 py-0.5 rounded border border-neutral-700">{u.authMethod.toUpperCase()}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                       <div className="flex items-center gap-2">
                         {roleChangeTarget === u.id ? <div className="flex gap-1">{roles.filter(r => r.id !== 'owner' && r.id !== u.role).map(r => <button key={r.id} onClick={() => handleRoleChange(u.id, r.id)} className="text-[8px] font-black px-2 py-1 rounded-md border border-neutral-700 text-neutral-400 hover:text-white">{r.name.toUpperCase()}</button>)}<button onClick={() => setRoleChangeTarget(null)} className="text-[8px] font-black text-neutral-600 px-2 uppercase tracking-widest">X</button></div> : 
                         passwordChangeTarget === u.id ? <div className="flex gap-2"><input type="text" value={newPasswordInput} onChange={e => setNewPasswordInput(e.target.value)} placeholder="New Secret" className="bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-1 text-[10px] w-24" /><button onClick={() => handleUpdatePassword(u.id)} className="text-[8px] font-black px-2 py-1 bg-emerald-500 text-neutral-950 rounded-md">RESET</button><button onClick={() => setPasswordChangeTarget(null)} className="text-[8px] text-neutral-600">X</button></div> :
                         <div className="flex items-center gap-3">
+                          <button onClick={() => setSelectedUser(u)} className="p-2 text-neutral-500 hover:text-white" title="View Profile"><User size={16} /></button>
                           {u.memberId ? (
                             <span className="text-[10px] font-mono text-neutral-500 bg-neutral-950 px-2 py-1 rounded border border-neutral-800">{u.memberId}</span>
                           ) : (
@@ -730,7 +795,8 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
               <div className="p-8 rounded-[2.5rem] bg-neutral-900/50 border border-neutral-800/50"><h3 className="text-white font-black text-xs uppercase tracking-widest mb-6 flex items-center justify-between">Directives <button onClick={handleSaveServerInfo} className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest ${serverSaved ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-500 text-neutral-950'}`}>{serverSaved ? 'STORED' : 'SAVE'}</button></h3>
               <div className="space-y-2 mb-6">{serverInfo.rules.map((r, i) => (
                 <div key={i} className="flex items-center gap-3 p-3 bg-neutral-950/40 rounded-xl border border-neutral-800/60 group">
-                  <span className="text-[10px] font-black text-emerald-500/50 w-4">{i+1}</span><p className="flex-1 text-xs text-neutral-400">{r}</p><button onClick={() => handleDeleteRule(i)} className="text-neutral-700 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14} /></button>
+                  <span className="text-[10px] font-black text-emerald-500/50 w-4">{i+1}</span>{editingRuleIndex === i ? <input type="text" value={editingRuleText} onChange={e => setEditingRuleText(e.target.value)} onBlur={() => handleEditRule(i)} onKeyDown={e => e.key === 'Enter' && handleEditRule(i)} className="flex-1 bg-transparent border-none p-0 text-xs text-white focus:ring-0" autoFocus /> : <p className="flex-1 text-xs text-neutral-400">{r}</p>}
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all"><button onClick={() => { setEditingRuleIndex(i); setEditingRuleText(r); }} className="text-neutral-700 hover:text-white"><Pencil size={14} /></button><button onClick={() => handleDeleteRule(i)} className="text-neutral-700 hover:text-red-400"><Trash2 size={14} /></button></div>
                 </div>
               ))}</div>
               <div className="flex gap-2"><input type="text" value={newRuleText} onChange={e => setNewRuleText(e.target.value)} placeholder="Type rule..." className={`${inputClass} !py-2`} onKeyDown={e => e.key === 'Enter' && handleAddRule()} /><button onClick={handleAddRule} disabled={!newRuleText.trim()} className="px-4 bg-emerald-500 text-neutral-950 font-black rounded-xl text-[9px] uppercase tracking-widest disabled:opacity-20">ADD</button></div></div>
@@ -764,7 +830,7 @@ export function AdminDashboard({ currentUser, onLogout, onBack }: Props) {
                   )}
                 </div>
               </div>
-              {showNewFormModal && <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[70] flex items-center justify-center p-4"><div className="bg-neutral-900 border border-neutral-800 rounded-[3rem] p-10 max-w-lg w-full shadow-2xl animate-in zoom-in-90 duration-300 text-center"><div className="h-16 w-16 rounded-[2rem] bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 mx-auto mb-8"><FormInput size={32} /></div><h2 className="text-3xl font-black text-white mb-3 tracking-tight uppercase">Establish Stream</h2><div className="space-y-6 mb-10"><input type="text" value={newFormName} onChange={e => setNewFormName(e.target.value)} className={inputClass} placeholder="Display Designation..." autoFocus /><textarea value={newFormDesc} onChange={e => setNewFormDesc(e.target.value)} className={`${inputClass} resize-none`} rows={3} placeholder="Mission Summary..." /></div><div className="flex flex-col gap-3"><button onClick={handleCreateForm} className="w-full py-5 bg-emerald-500 text-neutral-950 font-black rounded-3xl uppercase text-[10px] tracking-widest shadow-xl">ACTIVATE CHANNEL</button><button onClick={() => setShowNewFormModal(false)} className="w-full py-4 text-neutral-600 font-bold uppercase text-[9px] tracking-widest">DISMISS</button></div></div></div>}
+              {showNewFormModal && <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[70] flex items-center justify-center p-4"><div className="bg-neutral-900 border border-neutral-800 rounded-[3rem] p-10 max-lg w-full shadow-2xl animate-in zoom-in-90 duration-300 text-center"><div className="h-16 w-16 rounded-[2rem] bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500 mx-auto mb-8"><FormInput size={32} /></div><h2 className="text-3xl font-black text-white mb-3 tracking-tight uppercase">Establish Stream</h2><div className="space-y-6 mb-10"><input type="text" value={newFormName} onChange={e => setNewFormName(e.target.value)} className={inputClass} placeholder="Display Designation..." autoFocus /><textarea value={newFormDesc} onChange={e => setNewFormDesc(e.target.value)} className={`${inputClass} resize-none`} rows={3} placeholder="Mission Summary..." /></div><div className="flex flex-col gap-3"><button onClick={handleCreateForm} className="w-full py-5 bg-emerald-500 text-neutral-950 font-black rounded-3xl uppercase text-[10px] tracking-widest shadow-xl">ACTIVATE CHANNEL</button><button onClick={() => setShowNewFormModal(false)} className="w-full py-4 text-neutral-600 font-bold uppercase text-[9px] tracking-widest">DISMISS</button></div></div></div>}
             </div>
           )}
 

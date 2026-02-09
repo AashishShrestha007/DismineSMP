@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Navbar } from './components/Navbar';
 import { Hero } from './components/Hero';
 import { SeasonBanner } from './components/SeasonBanner';
@@ -12,7 +12,8 @@ import { AdminLogin } from './components/admin/AdminLogin';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { AuthPage } from './components/auth/AuthPage';
 import { UserPortal } from './components/auth/UserPortal';
-import { getSession, canAccessAdmin, clearSession, ensureOwnerAccount } from './lib/store';
+import { Maintenance } from './components/Maintenance';
+import { getSession, canAccessAdmin, clearSession, ensureOwnerAccount, getSettings } from './lib/store';
 
 type Route = 'home' | 'auth' | 'portal' | 'admin-login' | 'admin-dashboard';
 
@@ -86,124 +87,120 @@ export function App() {
     window.scrollTo(0, 0);
   };
 
-  // Auth page
-  if (route === 'auth') {
-    return (
-      <AuthPage
-        onAuth={() => {
-          forceRefresh();
-          const user = getSession();
-          if (window.location.hash === '#admin' && user && canAccessAdmin(user.role)) {
-            navigateTo('admin-dashboard');
-          } else {
-            navigateTo('portal');
-          }
-        }}
-        onBack={() => navigateTo('home')}
-      />
-    );
-  }
+  const currentUser = useMemo(() => getSession(), [route]);
+  const isStaff = currentUser && canAccessAdmin(currentUser.role);
+  const settings = getSettings();
+  const isMaintenance = !settings.loginEnabled && !isStaff;
 
-  // User portal
-  if (route === 'portal') {
-    return (
-      <UserPortal
-        onBack={() => navigateTo('home')}
-        onLogout={() => {
-          forceRefresh();
-          navigateTo('home');
-        }}
-        onApply={() => {
-          navigateTo('home');
-          setTimeout(() => {
-            document.getElementById('apply')?.scrollIntoView({ behavior: 'smooth' });
-          }, 100);
-        }}
-      />
-    );
-  }
-
-  // Admin login
-  if (route === 'admin-login') {
-    return (
-      <AdminLogin
-        onLogin={() => {
-          forceRefresh();
-          setRoute('admin-dashboard');
-        }}
-        onBack={() => navigateTo('home')}
-      />
-    );
-  }
-
-  // Admin dashboard
-  if (route === 'admin-dashboard') {
-    const user = getSession();
-    if (!user || !canAccessAdmin(user.role)) {
-      return (
-        <AdminLogin
-          onLogin={() => {
-            forceRefresh();
-            setRoute('admin-dashboard');
-          }}
-          onBack={() => navigateTo('home')}
-        />
-      );
+  // Content selector
+  const renderContent = () => {
+    if (isMaintenance && route !== 'admin-login' && route !== 'admin-dashboard') {
+      return <Maintenance />;
     }
 
-    return (
-      <AdminDashboard
-        currentUser={user}
-        onLogout={() => {
-          clearSession();
-          forceRefresh();
-          navigateTo('home');
-        }}
-        onBack={() => navigateTo('home')}
-      />
-    );
-  }
+    switch (route) {
+      case 'auth':
+        return (
+          <AuthPage
+            onAuth={() => {
+              forceRefresh();
+              const user = getSession();
+              if (window.location.hash === '#admin' && user && canAccessAdmin(user.role)) {
+                navigateTo('admin-dashboard');
+              } else {
+                navigateTo('portal');
+              }
+            }}
+            onBack={() => navigateTo('home')}
+          />
+        );
+      
+      case 'portal':
+        return (
+          <UserPortal
+            onBack={() => navigateTo('home')}
+            onLogout={() => {
+              clearSession();
+              forceRefresh();
+              navigateTo('home');
+            }}
+            onApply={() => {
+              navigateTo('home');
+              setTimeout(() => {
+                document.getElementById('apply')?.scrollIntoView({ behavior: 'smooth' });
+              }, 100);
+            }}
+          />
+        );
 
-  // ══════════════════════════════════════════════════════════
-  // MAIN HOMEPAGE — This is what visitors see
-  // ══════════════════════════════════════════════════════════
-  const currentUser = getSession();
-  const isStaff = currentUser && canAccessAdmin(currentUser.role);
+      case 'admin-login':
+        return (
+          <AdminLogin
+            onLogin={() => {
+              forceRefresh();
+              navigateTo('admin-dashboard');
+            }}
+            onBack={() => navigateTo('home')}
+          />
+        );
+
+      case 'admin-dashboard':
+        if (!currentUser || !canAccessAdmin(currentUser.role)) {
+          return (
+            <AdminLogin
+              onLogin={() => {
+                forceRefresh();
+                navigateTo('admin-dashboard');
+              }}
+              onBack={() => navigateTo('home')}
+            />
+          );
+        }
+        return (
+          <AdminDashboard
+            currentUser={currentUser}
+            onLogout={() => {
+              clearSession();
+              forceRefresh();
+              navigateTo('home');
+            }}
+            onBack={() => navigateTo('home')}
+          />
+        );
+
+      default:
+        return (
+          <main>
+            <Hero />
+            <SeasonBanner />
+            <About />
+            <Details />
+            <Team />
+            <Application />
+            <Community />
+          </main>
+        );
+    }
+  };
+
+  // Components that don't need the standard layout
+  const isSpecialPage = ['auth', 'admin-login', 'admin-dashboard'].includes(route) || isMaintenance;
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-200">
-      {/* 1. Navigation */}
-      <Navbar
-        onAdminClick={isStaff ? () => navigateTo('admin-dashboard') : undefined}
-        onLoginClick={() => navigateTo('auth')}
-        onPortalClick={() => navigateTo('portal')}
-      />
+    <div className="min-h-screen bg-neutral-950 text-neutral-200 selection:bg-emerald-500/30 selection:text-emerald-200">
+      {!isSpecialPage && (
+        <Navbar
+          onAdminClick={isStaff ? () => navigateTo('admin-dashboard') : undefined}
+          onLoginClick={() => navigateTo('auth')}
+          onPortalClick={() => navigateTo('portal')}
+        />
+      )}
 
-      <main>
-        {/* 3. Hero Section */}
-        <Hero />
+      {renderContent()}
 
-        {/* 4. Season Banner — shows current season with custom image */}
-        <SeasonBanner />
-
-        {/* 5. About the SMP */}
-        <About />
-
-        {/* 6. Server Details & Rules */}
-        <Details />
-
-        {/* 7. Team */}
-        <Team />
-
-        {/* 8. Application Form */}
-        <Application />
-
-        {/* 9. Community & Socials */}
-        <Community />
-      </main>
-
-      {/* 10. Footer */}
-      <Footer onAdminClick={isStaff ? () => navigateTo('admin-dashboard') : undefined} />
+      {!isSpecialPage && (
+        <Footer onAdminClick={isStaff ? () => navigateTo('admin-dashboard') : undefined} />
+      )}
     </div>
   );
 }
